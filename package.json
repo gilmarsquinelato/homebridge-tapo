@@ -1,0 +1,38 @@
+{
+  "name": "homebridge-tapo",
+  "version": "1.0.0",
+  "description": "Homebridge plugin for TP-Link Tapo smart devices using native Rust bindings",
+  "main": "js/index.js",
+  "files": [
+    "js/**/*.js",
+    "*.node",
+    "config.schema.json"
+  ],
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "npm run build"
+  },
+  "napi": {
+    "name": "homebridge-tapo",
+    "triples": {
+      "defaults": true
+    }
+  },
+  "keywords": [
+    "homebridge-plugin",
+    "tapo",
+    "tp-link",
+    "smart-home"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0",
+    "homebridge": ">=1.6.0"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0",
+    "homebridge": "^1.8.0"
+  }
+}
