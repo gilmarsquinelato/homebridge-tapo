@@ -4,6 +4,7 @@
   "description": "Homebridge plugin for TP-Link Tapo smart devices using native Rust bindings",
   "main": "js/index.js",
   "files": [
+    "index.js",
     "js/**/*.js",
     "*.node",
     "config.schema.json"
