@@ -25,6 +25,10 @@
     "tp-link",
     "smart-home"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gilmarsquinelato/homebridge-tapo"
+  },
   "author": "",
   "license": "MIT",
   "engines": {
