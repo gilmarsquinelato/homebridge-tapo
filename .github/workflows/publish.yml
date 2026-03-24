@@ -96,7 +96,7 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
-      - run: npm install
+      - run: npm install --ignore-scripts
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -111,6 +111,6 @@ jobs:
           ls -la *.node
 
       - name: Publish
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
