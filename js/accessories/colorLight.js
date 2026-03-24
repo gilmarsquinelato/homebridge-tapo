@@ -53,6 +53,14 @@ class TapoColorLightAccessory {
       .getCharacteristic(this.api.hap.Characteristic.ColorTemperature)
       .onGet(() => this.getColorTemperature())
       .onSet((value) => this.setColorTemperature(value));
+
+    // Enable Adaptive Lighting — HAP-NodeJS handles the 24-hour color
+    // temperature transitions automatically, calling our setColorTemperature
+    // handler as needed.
+    this.adaptiveLightingController = new this.api.hap.AdaptiveLightingController(this.service, {
+      controllerMode: this.api.hap.AdaptiveLightingControllerMode.AUTOMATIC,
+    });
+    this.accessory.configureController(this.adaptiveLightingController);
   }
 
   async getOn() {
