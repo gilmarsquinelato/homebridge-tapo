@@ -167,6 +167,12 @@ class TapoColorLightAccessory {
 
   async setColorTemperature(mireds) {
     try {
+      // Skip if light is off — Tapo's setColorTemperature implicitly turns
+      // the light on, which causes adaptive lighting to wake the device.
+      const isOn = this.service.getCharacteristic(this.api.hap.Characteristic.On).value;
+      if (!isOn) {
+        return;
+      }
       const kelvin = Math.max(2500, Math.min(6500, Math.round(1000000 / mireds)));
       await this.nativeHandler.setColorTemperature(kelvin);
     } catch (err) {
