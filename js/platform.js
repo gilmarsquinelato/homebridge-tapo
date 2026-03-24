@@ -4,7 +4,7 @@ const { TapoLightAccessory } = require('./accessories/light');
 const { TapoColorLightAccessory } = require('./accessories/colorLight');
 const { TapoPowerStripAccessory } = require('./accessories/powerStrip');
 
-const PLUGIN_NAME = 'homebridge-tapo';
+const PLUGIN_NAME = '@gilmarsquinelato/homebridge-tapo';
 const PLATFORM_NAME = 'TapoSmartHome';
 
 const DEVICE_TYPE_MAP = {

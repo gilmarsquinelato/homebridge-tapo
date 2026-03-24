@@ -1,6 +1,6 @@
 const { TapoPlatform } = require('./platform');
 
-const PLUGIN_NAME = 'homebridge-tapo';
+const PLUGIN_NAME = '@gilmarsquinelato/homebridge-tapo';
 const PLATFORM_NAME = 'TapoSmartHome';
 
 module.exports = (api) => {
