@@ -1,6 +1,6 @@
 {
   "name": "@gilmarsquinelato/homebridge-tapo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Homebridge plugin for TP-Link Tapo smart devices using native Rust bindings",
   "main": "js/index.js",
   "files": [
