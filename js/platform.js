@@ -114,12 +114,13 @@ class TapoPlatform {
       }
     }
 
-    // Remove accessories for devices that are no longer discovered
+    // Mark accessories not found in this scan as unreachable, but do NOT
+    // unregister them.  Unregistering causes HomeKit to lose room assignments,
+    // adaptive-lighting configuration and other user metadata.  The accessories
+    // stay cached so they re-activate automatically on the next successful scan.
     for (const [uuid, accessory] of this.accessories) {
       if (!discoveredUuids.has(uuid)) {
-        this.log.info('Removing accessory no longer found:', accessory.displayName);
-        this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
-        this.accessories.delete(uuid);
+        this.log.debug('Device not found in this scan, keeping cached: %s', accessory.displayName);
         this.handlers.delete(uuid);
       }
     }
@@ -138,8 +139,18 @@ class TapoPlatform {
         await handler.updateState();
       } catch (err) {
         this.log.debug('State update failed for %s, reconnecting: %s', device.nickname, err.message);
-        this.handlers.delete(uuid);
-        await this.createHandler(accessory, device);
+        // Reconnect the native transport without recreating the accessory
+        // handler.  Recreating would instantiate a new
+        // AdaptiveLightingController which resets adaptive-lighting state.
+        try {
+          const connectMethod = CONNECT_METHOD_MAP[device.deviceType];
+          if (connectMethod) {
+            handler.nativeHandler = await this.client[connectMethod](device.ip);
+            await handler.updateState();
+          }
+        } catch (reconnectErr) {
+          this.log.debug('Reconnect also failed for %s: %s', device.nickname, reconnectErr.message);
+        }
       }
       return;
     }
