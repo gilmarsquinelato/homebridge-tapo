@@ -46,7 +46,7 @@ class TapoPlatform {
     this.email = config.email;
     this.password = config.password;
     this.broadcastAddress = config.broadcastAddress || '255.255.255.255';
-    this.discoveryTimeout = config.discoveryTimeout || 5;
+    this.discoveryTimeout = config.discoveryTimeout || 10;
     this.pollingInterval = (config.pollingInterval || 300) * 1000;
 
     this.client = new TapoClient(this.email, this.password);
@@ -114,14 +114,14 @@ class TapoPlatform {
       }
     }
 
-    // Mark accessories not found in this scan as unreachable, but do NOT
-    // unregister them.  Unregistering causes HomeKit to lose room assignments,
-    // adaptive-lighting configuration and other user metadata.  The accessories
-    // stay cached so they re-activate automatically on the next successful scan.
+    // Devices that didn't answer this broadcast are NOT removed.  UDP
+    // discovery is lossy and a single missed beacon doesn't mean the device
+    // is gone — keep the existing handler so HomeKit can still talk to it.
+    // We only act on missed devices when a real API call against them
+    // actually fails (see reconnectAccessory()).
     for (const [uuid, accessory] of this.accessories) {
       if (!discoveredUuids.has(uuid)) {
-        this.log.debug('Device not found in this scan, keeping cached: %s', accessory.displayName);
-        this.handlers.delete(uuid);
+        this.log.debug('Device not seen in this scan, keeping handler: %s', accessory.displayName);
       }
     }
   }
@@ -129,25 +129,20 @@ class TapoPlatform {
   async setupAccessoryHandler(accessory, device) {
     const uuid = accessory.UUID;
 
-    // Store device context for cache restoration
     accessory.context.device = device;
 
-    // If handler already exists, just update state
+    // If handler already exists, refresh state but reuse the handler so the
+    // AdaptiveLightingController and other characteristic state survives.
     if (this.handlers.has(uuid)) {
       const handler = this.handlers.get(uuid);
+      handler.device = device;
       try {
         await handler.updateState();
       } catch (err) {
         this.log.debug('State update failed for %s, reconnecting: %s', device.nickname, err.message);
-        // Reconnect the native transport without recreating the accessory
-        // handler.  Recreating would instantiate a new
-        // AdaptiveLightingController which resets adaptive-lighting state.
         try {
-          const connectMethod = CONNECT_METHOD_MAP[device.deviceType];
-          if (connectMethod) {
-            handler.nativeHandler = await this.client[connectMethod](device.ip);
-            await handler.updateState();
-          }
+          await this.reconnectAccessory(uuid);
+          await handler.updateState();
         } catch (reconnectErr) {
           this.log.debug('Reconnect also failed for %s: %s', device.nickname, reconnectErr.message);
         }
@@ -156,6 +151,27 @@ class TapoPlatform {
     }
 
     await this.createHandler(accessory, device);
+  }
+
+  // Replace the underlying native transport for an existing accessory
+  // handler.  Used both during discovery (when state polling fails) and on
+  // demand from an accessory after a setter/getter throws.
+  async reconnectAccessory(uuid) {
+    const handler = this.handlers.get(uuid);
+    if (!handler) {
+      return null;
+    }
+    const device = handler.device;
+    const connectMethod = CONNECT_METHOD_MAP[device.deviceType];
+    if (!connectMethod) {
+      return null;
+    }
+    const nativeHandler = await this.client[connectMethod](device.ip);
+    handler.nativeHandler = nativeHandler;
+    if (typeof handler.onReconnect === 'function') {
+      handler.onReconnect();
+    }
+    return nativeHandler;
   }
 
   async createHandler(accessory, device) {

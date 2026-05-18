@@ -1,3 +1,5 @@
+const { createInfoCache } = require('../infoCache');
+
 class TapoPlugAccessory {
   constructor(platform, accessory, device, nativeHandler) {
     this.platform = platform;
@@ -6,6 +8,8 @@ class TapoPlugAccessory {
     this.nativeHandler = nativeHandler;
     this.log = platform.log;
     this.api = platform.api;
+
+    this.infoCache = createInfoCache(() => this.nativeHandler.getDeviceInfo());
 
     const infoService =
       this.accessory.getService(this.api.hap.Service.AccessoryInformation) ||
@@ -31,12 +35,18 @@ class TapoPlugAccessory {
       .onSet((value) => this.setOn(value));
   }
 
+  onReconnect() {
+    this.infoCache.invalidate();
+  }
+
   async getOn() {
     try {
-      const info = await this.nativeHandler.getDeviceInfo();
+      const info = await this.infoCache.get();
       return info.deviceOn;
-    } catch {
-      return false;
+    } catch (err) {
+      this.log.debug('getOn failed for %s: %s', this.device.nickname, err.message);
+      const last = this.infoCache.peek();
+      return last ? last.deviceOn : false;
     }
   }
 
@@ -47,17 +57,27 @@ class TapoPlugAccessory {
       } else {
         await this.nativeHandler.turnOff();
       }
+      this.infoCache.patch({ deviceOn: value });
     } catch (err) {
-      this.log.error('Failed to set power for %s: %s', this.device.nickname, err.message);
-      throw new this.api.hap.HapStatusError(
-        this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
+      this.log.debug('setOn failed for %s, reconnecting: %s', this.device.nickname, err.message);
+      try {
+        await this.platform.reconnectAccessory(this.accessory.UUID);
+        if (value) {
+          await this.nativeHandler.turnOn();
+        } else {
+          await this.nativeHandler.turnOff();
+        }
+        this.infoCache.patch({ deviceOn: value });
+      } catch (retryErr) {
+        this.log.error('setOn retry failed for %s: %s', this.device.nickname, retryErr.message);
+      }
     }
   }
 
   async updateState() {
     try {
-      const info = await this.nativeHandler.getDeviceInfo();
+      this.infoCache.invalidate();
+      const info = await this.infoCache.get();
       this.service.updateCharacteristic(
         this.api.hap.Characteristic.On,
         info.deviceOn,
