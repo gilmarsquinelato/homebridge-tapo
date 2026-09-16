@@ -1,4 +1,4 @@
-const { createInfoCache } = require('../infoCache');
+const { createInfoCache, WRITE_SETTLE_MS } = require('../infoCache');
 
 class TapoLightAccessory {
   constructor(platform, accessory, device, nativeHandler) {
@@ -105,15 +105,28 @@ class TapoLightAccessory {
     }
   }
 
-  async updateState() {
-    try {
-      this.infoCache.invalidate();
-      const info = await this.infoCache.get();
-      this.service.updateCharacteristic(this.api.hap.Characteristic.On, info.deviceOn);
-      this.service.updateCharacteristic(this.api.hap.Characteristic.Brightness, info.brightness || 0);
-    } catch (err) {
-      this.log.debug('Failed to update state for %s: %s', this.device.nickname, err.message);
+  // Push a value to HomeKit only when it actually changed, so the state
+  // poller doesn't emit a change event on every tick.
+  _push(characteristic, value) {
+    const current = this.service.getCharacteristic(characteristic).value;
+    if (current !== value) {
+      this.service.updateCharacteristic(characteristic, value);
     }
+  }
+
+  // Called by the platform's state poller.  Throws on a failed read so the
+  // platform can reconnect and retry against a fresh session.
+  async updateState() {
+    // A write we just made may not be reflected by the device yet; let it
+    // settle rather than bouncing the characteristic back in the Home app.
+    if (this.infoCache.sinceWrite() < WRITE_SETTLE_MS) {
+      return;
+    }
+
+    this.infoCache.invalidate();
+    const info = await this.infoCache.get();
+    this._push(this.api.hap.Characteristic.On, info.deviceOn);
+    this._push(this.api.hap.Characteristic.Brightness, info.brightness || 0);
   }
 }
 

@@ -7,6 +7,10 @@ const { TapoPowerStripAccessory } = require('./accessories/powerStrip');
 const PLUGIN_NAME = '@gilmarsquinelato/homebridge-tapo';
 const PLATFORM_NAME = 'TapoSmartHome';
 
+const DEFAULT_DISCOVERY_INTERVAL = 300;
+const DEFAULT_STATE_INTERVAL = 10;
+const MIN_STATE_INTERVAL = 3;
+
 const DEVICE_TYPE_MAP = {
   Plug: TapoPlugAccessory,
   'Plug with Energy Monitoring': TapoPlugAccessory,
@@ -37,6 +41,7 @@ class TapoPlatform {
     this.api = api;
     this.accessories = new Map();
     this.handlers = new Map();
+    this.statePollInFlight = false;
 
     if (!config) {
       this.log.warn('No configuration found for TapoSmartHome platform');
@@ -47,22 +52,36 @@ class TapoPlatform {
     this.password = config.password;
     this.broadcastAddress = config.broadcastAddress || '255.255.255.255';
     this.discoveryTimeout = config.discoveryTimeout || 10;
-    this.pollingInterval = (config.pollingInterval || 300) * 1000;
+    // Discovery is a slow UDP broadcast — it only needs to run often enough
+    // to notice new or relocated devices.
+    this.discoveryInterval = (config.pollingInterval || DEFAULT_DISCOVERY_INTERVAL) * 1000;
+    // State polling talks to each known device directly and is what keeps
+    // HomeKit in sync with changes made outside of it (app, wall switch).
+    this.stateInterval =
+      Math.max(MIN_STATE_INTERVAL, config.stateInterval || DEFAULT_STATE_INTERVAL) * 1000;
 
     this.client = new TapoClient(this.email, this.password);
 
-    this.api.on('didFinishLaunching', () => {
+    this.api.on('didFinishLaunching', async () => {
       this.log.info('Tapo platform finished launching');
-      this.discoverDevices();
+      await this.discoverDevices();
 
       this.discoveryTimer = setInterval(() => {
         this.discoverDevices();
-      }, this.pollingInterval);
+      }, this.discoveryInterval);
+
+      this.log.info('Polling device state every %d seconds', this.stateInterval / 1000);
+      this.stateTimer = setInterval(() => {
+        this.pollStates();
+      }, this.stateInterval);
     });
 
     this.api.on('shutdown', () => {
       if (this.discoveryTimer) {
         clearInterval(this.discoveryTimer);
+      }
+      if (this.stateTimer) {
+        clearInterval(this.stateTimer);
       }
     });
   }
@@ -116,9 +135,8 @@ class TapoPlatform {
 
     // Devices that didn't answer this broadcast are NOT removed.  UDP
     // discovery is lossy and a single missed beacon doesn't mean the device
-    // is gone — keep the existing handler so HomeKit can still talk to it.
-    // We only act on missed devices when a real API call against them
-    // actually fails (see reconnectAccessory()).
+    // is gone — keep the existing handler so HomeKit can still talk to it,
+    // and so the state poller keeps refreshing it over TCP.
     for (const [uuid, accessory] of this.accessories) {
       if (!discoveredUuids.has(uuid)) {
         this.log.debug('Device not seen in this scan, keeping handler: %s', accessory.displayName);
@@ -131,20 +149,25 @@ class TapoPlatform {
 
     accessory.context.device = device;
 
-    // If handler already exists, refresh state but reuse the handler so the
-    // AdaptiveLightingController and other characteristic state survives.
+    // If a handler already exists, reuse it so the AdaptiveLightingController
+    // and other characteristic state survive.  Discovery only keeps the
+    // addressing information current — refreshing state is the poller's job.
     if (this.handlers.has(uuid)) {
       const handler = this.handlers.get(uuid);
+      const previousIp = handler.device && handler.device.ip;
       handler.device = device;
-      try {
-        await handler.updateState();
-      } catch (err) {
-        this.log.debug('State update failed for %s, reconnecting: %s', device.nickname, err.message);
+
+      if (previousIp && previousIp !== device.ip) {
+        this.log.info(
+          '%s moved from %s to %s, reconnecting',
+          device.nickname,
+          previousIp,
+          device.ip,
+        );
         try {
           await this.reconnectAccessory(uuid);
-          await handler.updateState();
-        } catch (reconnectErr) {
-          this.log.debug('Reconnect also failed for %s: %s', device.nickname, reconnectErr.message);
+        } catch (err) {
+          this.log.debug('Reconnect after IP change failed for %s: %s', device.nickname, err.message);
         }
       }
       return;
@@ -153,8 +176,49 @@ class TapoPlatform {
     await this.createHandler(accessory, device);
   }
 
+  // Refresh every known accessory directly over TCP.  This is independent of
+  // discovery: a device that missed the last UDP broadcast is still polled,
+  // and one that was power-cycled gets a fresh session on the retry.
+  async pollStates() {
+    if (this.statePollInFlight) {
+      this.log.debug('Previous state poll still running, skipping this tick');
+      return;
+    }
+
+    this.statePollInFlight = true;
+    try {
+      await Promise.allSettled(
+        [...this.handlers.keys()].map((uuid) => this.refreshAccessoryState(uuid)),
+      );
+    } finally {
+      this.statePollInFlight = false;
+    }
+  }
+
+  async refreshAccessoryState(uuid) {
+    const handler = this.handlers.get(uuid);
+    if (!handler) {
+      return;
+    }
+
+    const name = handler.device ? handler.device.nickname : uuid;
+
+    try {
+      await handler.updateState();
+    } catch (err) {
+      this.log.debug('State poll failed for %s, reconnecting: %s', name, err.message);
+      try {
+        await this.reconnectAccessory(uuid);
+        await handler.updateState();
+        this.log.info('Recovered connection to %s', name);
+      } catch (retryErr) {
+        this.log.debug('State poll retry failed for %s: %s', name, retryErr.message);
+      }
+    }
+  }
+
   // Replace the underlying native transport for an existing accessory
-  // handler.  Used both during discovery (when state polling fails) and on
+  // handler.  Used both by the state poller (when a poll fails) and on
   // demand from an accessory after a setter/getter throws.
   async reconnectAccessory(uuid) {
     const handler = this.handlers.get(uuid);
@@ -191,7 +255,7 @@ class TapoPlatform {
       const nativeHandler = await this.client[connectMethod](device.ip);
       const handler = new AccessoryClass(this, accessory, device, nativeHandler);
       this.handlers.set(accessory.UUID, handler);
-      await handler.updateState();
+      await this.refreshAccessoryState(accessory.UUID);
     } catch (err) {
       this.log.error(
         'Failed to connect to %s (%s) at %s: %s',

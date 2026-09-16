@@ -55,7 +55,8 @@ To run as a child bridge (recommended), add the `_bridge` section with a unique 
 | `password` | — | TP-Link account password (required) |
 | `broadcastAddress` | `255.255.255.255` | Network broadcast address for discovery |
 | `discoveryTimeout` | `5` | Seconds to wait for device responses |
-| `pollingInterval` | `300` | Seconds between discovery/state polls |
+| `pollingInterval` | `300` | Seconds between device discovery scans (finds new/relocated devices) |
+| `stateInterval` | `10` | Seconds between state polls — how quickly HomeKit reflects changes made outside of it |
 
 ## Building from Source
 

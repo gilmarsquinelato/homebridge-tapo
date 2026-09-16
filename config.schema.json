@@ -39,11 +39,18 @@
         "description": "How long to wait for devices to respond during discovery"
       },
       "pollingInterval": {
-        "title": "Polling Interval (seconds)",
+        "title": "Discovery Interval (seconds)",
         "type": "integer",
         "default": 300,
         "minimum": 60,
-        "description": "How often to re-discover devices and update state"
+        "description": "How often to re-run device discovery to pick up new or relocated devices"
+      },
+      "stateInterval": {
+        "title": "State Polling Interval (seconds)",
+        "type": "integer",
+        "default": 10,
+        "minimum": 3,
+        "description": "How often to read each device's state so HomeKit reflects changes made outside of it (Tapo app, wall switch). Lower values react faster but generate more network traffic."
       }
     }
   }
