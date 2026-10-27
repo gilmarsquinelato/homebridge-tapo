@@ -25,7 +25,7 @@ pub async fn run_discovery(
                     device_id: device.device_id().to_string(),
                     model: device.model().to_string(),
                     device_type: device.device_type().to_string(),
-                    ip: device.ip().to_string(),
+                    ip: device.address().0,
                     nickname: device.nickname().to_string(),
                 });
             }
